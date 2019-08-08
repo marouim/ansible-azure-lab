@@ -1,0 +1,17 @@
+- name: Validate that we have a lab_id
+  assert:
+      that: lab_id is defined
+      msg: You need to pass lab_id as an extra parameter to execute this playbook
+
+- name: Do we have our AZURE Credentials
+  assert:
+    { that: "{{ item}} != ''" }
+  with_items:
+    - azure_client_id
+    - azure_tenant
+    - azure_subscription_id
+    - azure_secret 
+
+- name: "Define the resource group name"
+  set_fact:
+    res_group: "{{ lab_id }}"

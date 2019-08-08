@@ -1,0 +1,11 @@
+- name: Create security group named {{ name }}
+  azure_rm_securitygroup:
+    client_id: "{{ azure_client_id }}"
+    tenant: "{{ azure_tenant }}"
+    subscription_id: "{{ azure_subscription_id }}"
+    secret: "{{ azure_secret }}"
+    resource_group: "{{ res_group }}"
+    name: "{{ name }}"
+    rules: "{{ rules }}"
+  tags:
+    - prep-network

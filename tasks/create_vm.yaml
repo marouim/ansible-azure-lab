@@ -1,0 +1,61 @@
+- name: Create public ip for {{ vm_name }}
+  azure_rm_publicipaddress:
+    client_id: "{{ azure_client_id }}"
+    tenant: "{{ azure_tenant }}"
+    subscription_id: "{{ azure_subscription_id }}"
+    secret: "{{ azure_secret }}"
+    resource_group: "{{ res_group }}"
+    allocation_method: Static
+    name: "pub-ip-{{ vm_name }}"
+
+- name: Create NIC for {{ vm_name }}
+  azure_rm_networkinterface:
+    client_id: "{{ azure_client_id }}"
+    tenant: "{{ azure_tenant }}"
+    subscription_id: "{{ azure_subscription_id }}"
+    secret: "{{ azure_secret }}"
+    resource_group: "{{ res_group }}"
+    name: "nic-{{ vm_name }}"
+    virtual_network: "{{ vm_virtual_network }}"
+    subnet: "{{ vm_subnet }}"
+    ip_configurations:
+    - name: "primary"
+      public_ip_name: "pub-ip-{{ vm_name }}"
+      private_ip_address: "{{ vm_ip_address }}"
+      private_ip_allocation_method: "Static"
+      primary: "yes"
+    security_group: "{{ vm_security_group }}"
+
+- name: Create VM {{ vm_name }}
+  azure_rm_virtualmachine:
+    client_id: "{{ azure_client_id }}"
+    tenant: "{{ azure_tenant }}"
+    subscription_id: "{{ azure_subscription_id }}"
+    secret: "{{ azure_secret }}"
+    resource_group: "{{ res_group }}"
+    name: "{{ vm_name }}"
+    vm_size: "{{ vm_size }}"
+    managed_disk_type: "{{ storage_class }}"
+    storage_account: "lrs{{ lab_id }}"
+    storage_container: "vms{{lab_id}}"
+    storage_blob: "blob-{{vm_name}}.vhd"
+    admin_username: "{{ username }}"
+    admin_password: "{{ password }}"
+    network_interfaces: "nic-{{ vm_name }}"
+    image: "{{ vm_image }}"
+    ssh_public_keys: 
+      - path: /home/{{ username }}/.ssh/authorized_keys
+        key_data: "{{ lookup('file', 'insecure.pub') }}"
+  register: create_vm_output
+
+- set_fact:
+    vm_public_ip: "{{ create_vm_output.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0].properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress }}"
+
+- name: Add host to dynamic inventory
+  add_host:
+    name: "{{ vm_name }}"
+    ansible_host: "{{ vm_public_ip }}"
+    ansible_user: "{{ username }}"
+    #ansible_ssh_private_key_file: "insecure"
+    ansible_ssh_pass: "{{ password }}"
+    ansible_sudo_pass: "{{ password }}"

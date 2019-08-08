@@ -1,0 +1,45 @@
+- name: create ressource group 
+  azure_rm_resourcegroup:
+    client_id: "{{ azure_client_id }}"
+    tenant: "{{ azure_tenant }}"
+    subscription_id: "{{ azure_subscription_id }}"
+    secret: "{{ azure_secret }}"
+    name: "{{ res_group }}"
+    location: eastus
+
+- name: Create storage account
+  azure_rm_storageaccount:
+    client_id: "{{ azure_client_id }}"
+    tenant: "{{ azure_tenant }}"
+    subscription_id: "{{ azure_subscription_id }}"
+    secret: "{{ azure_secret }}"
+    resource_group: "{{ res_group }}"
+    name: "lrs{{ lab_id }}"
+    account_type: "{{ storage_class }}"
+  tags:
+    - prep-storage
+
+- name: Create virtual network
+  azure_rm_virtualnetwork:
+    client_id: "{{ azure_client_id }}"
+    tenant: "{{ azure_tenant }}"
+    subscription_id: "{{ azure_subscription_id }}"
+    secret: "{{ azure_secret }}"
+    resource_group: "{{ res_group }}"
+    name: "vn{{ lab_id }}"
+    address_prefixes: "{{virtual_network_cidr}}"
+  tags:
+    - prep-network
+
+- name: Add subnet
+  azure_rm_subnet:
+    client_id: "{{ azure_client_id }}"
+    tenant: "{{ azure_tenant }}"
+    subscription_id: "{{ azure_subscription_id }}"
+    secret: "{{ azure_secret }}"
+    resource_group: "{{ res_group }}"
+    name: "sn{{ lab_id }}"
+    address_prefix: "{{virtual_network_cidr}}"
+    virtual_network: "vn{{ lab_id }}"
+  tags:
+    - prep-network

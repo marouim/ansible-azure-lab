@@ -3,245 +3,60 @@
   hosts: localhost
   connection: local
   gather_facts: false
-  vars:
-    storage_class: Standard_LRS
-    virtual_network_cidr: 192.168.33.0/24
-    username: "ansible"
-    password: "Password1!"
-    centos_vm_size: Standard_D2_v3
-    centos_ip_address: "192.168.33.51"
-    windows_vm_size: Standard_D2_v3
-    windows_ip_address: "192.168.33.50"
-    ansible_tower_install: false
-    ansible_tower_basename: "ansible-tower-setup"
-    ansible_tower_version: "3.5.1-1"
-    ansible_tower_archive: "{{ ansible_tower_basename }}-{{ ansible_tower_version }}.tar.gz"
-    ansible_tower_release_url: "http://releases.ansible.com/ansible-tower/setup/{{ ansible_tower_archive }}"
-    ansible_tower_password: "ansible"
-
-    azure_client_id: "{{ lookup('env', 'AZURE_CLIENT_ID')}}"
-    azure_tenant: "{{ lookup('env', 'AZURE_TENANT')}}"
-    azure_subscription_id: "{{ lookup('env', 'AZURE_SUBSCRIPTION_ID')}}"
-    azure_secret: "{{ lookup('env', 'AZURE_SECRET')}}"
 
   pre_tasks:
-    - name: Validate that we have a lab_id
-      assert:
-          that: lab_id is defined
-          msg: You need to pass lab_id as an extra parameter to execute this playbook
-
-    - name: Do we have our AZURE Credentials
-      assert:
-        { that: "{{ item}} != ''" }
-      with_items:
-        - azure_client_id
-        - azure_tenant
-        - azure_subscription_id
-        - azure_secret 
-    
-    - name: "Define the resource group name"
-      set_fact:
-        res_group: "{{ lab_id }}"
+    - import_tasks: "tasks/check_variables.yaml"
   
   tasks:
 #
 # Generic tasks to bring the environment
 #
-
-    - name: create ressource group 
-      azure_rm_resourcegroup:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        name: "{{ res_group }}"
-        location: eastus
-
-    - name: Create storage account
-      azure_rm_storageaccount:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        resource_group: "{{ res_group }}"
-        name: "lrs{{ lab_id }}"
-        account_type: "{{ storage_class }}"
+    - import_tasks: "tasks/create_azure_environment.yaml"
       tags:
-        - prep-storage
+        - create_azure_env
 
-    - name: Create virtual network
-      azure_rm_virtualnetwork:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        resource_group: "{{ res_group }}"
-        name: "vn{{ lab_id }}"
-        address_prefixes: "{{virtual_network_cidr}}"
+    - import_tasks: "tasks/create_security_groups.yaml"
+      vars:
+        name: "sg-windows"
+        rules: "{{ default_security_rules_windows }}"
       tags:
-        - prep-network
+        - create_azure_env
 
-    - name: Add subnet
-      azure_rm_subnet:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        resource_group: "{{ res_group }}"
-        name: "sn{{ lab_id }}"
-        address_prefix: "{{virtual_network_cidr}}"
-        virtual_network: "vn{{ lab_id }}"
+    - import_tasks: "tasks/create_security_groups.yaml"
+      vars:
+        name: "sg-linux"
+        rules: "{{ default_security_rules_linux }}"
       tags:
-        - prep-network
+        - create_azure_env
+    
+    - name: "Create virtual machines from the topology object"
+      include_tasks: "tasks/create_vm.yaml"
+      with_items: "{{ topology.virtual_machines }}"
+      vars:
+        vm_name: "{{ item.vm_name }}"
+        vm_ip_address: "{{ item.vm_ip_address }}"
+        vm_security_group: "{{ item.vm_security_group }}"
+        vm_image: "{{ item.vm_image }}"
+        vm_size: "{{ item.vm_size }}"
+        vm_subnet: "sn{{ lab_id }}"
+        vm_virtual_network: "vn{{ lab_id }}"
 
-    - name: Create public ip for CentOS VM
-      azure_rm_publicipaddress:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        resource_group: "{{ res_group }}"
-        allocation_method: Static
-        name: "pbi01{{ lab_id }}"
-      tags:
-        - prep-centos
 
-    - name: Create public ip for Windows VM
-      azure_rm_publicipaddress:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        resource_group: "{{ res_group }}"
-        allocation_method: Static
-        name: "pbi02{{ lab_id }}"
-      tags:
-        - prep-windows
+    - fail:
+        msg: "test"
 
-    - name: Create security group that allows incoming traffic on SSH/HTTP/HTTPS/RDP/WINRM
-      azure_rm_securitygroup:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        resource_group: "{{ res_group }}"
-        name: "sg{{lab_id}}"
-        rules:
-          - name: SSH
-            protocol: Tcp
-            destination_port_range: 22
-            access: Allow
-            priority: 101
-            direction: Inbound
-          - name: RDP
-            protocol: Tcp
-            destination_port_range: 3389
-            access: Allow
-            priority: 102
-            direction: Inbound
-          - name: HTTP
-            protocol: Tcp
-            destination_port_range: 80
-            access: Allow
-            priority: 103
-            direction: Inbound
-          - name: HTTPS
-            protocol: Tcp
-            destination_port_range: 443
-            access: Allow
-            priority: 104
-            direction: Inbound
-          - name: WINRM
-            protocol: Tcp
-            destination_port_range: 5985
-            access: Allow
-            priority: 105
-            direction: Inbound
-      tags:
-        - prep-network
+
+
+
 
 #
 # Create CentOS NIC and VM 
 #
-    - name: Create NIC for CentOS VM
-      azure_rm_networkinterface:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        resource_group: "{{ res_group }}"
-        name: "nic01{{ lab_id }}"
-        virtual_network: "vn{{ lab_id }}"
-        subnet: "sn{{ lab_id }}"
-        ip_configurations:
-        - name: "primary"
-          public_ip_name: "pbi01{{ lab_id }}"
-          private_ip_address: "{{ centos_ip_address }}"
-          private_ip_allocation_method: "Static"
-          primary: "yes"
-        security_group: "sg{{ lab_id }}"
-      tags:
-        - prep-centos
 
-    - name: Create Centos VM
-      azure_rm_virtualmachine:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        resource_group: "{{ res_group }}"
-        name: "centos{{ lab_id }}"
-        vm_size: "{{ centos_vm_size }}"
-        managed_disk_type: "{{ storage_class }}"
-        storage_account: "lrs{{ lab_id }}"
-        storage_container: "vms{{lab_id}}"
-        storage_blob: "centos{{lab_id}}.vhd"
-        admin_username: "{{ username }}"
-        admin_password: "{{ password }}"
-        network_interfaces: "nic01{{lab_id}}"
-        image:
-          offer: CentOS
-          publisher: OpenLogic
-          sku: '7.4'
-          version: latest
-        ssh_public_keys: 
-          - path: /home/{{ username }}/.ssh/authorized_keys
-            key_data: "{{ lookup('file', 'insecure.pub') }}"
-      register: create_centos_vm_output
-      tags:
-        - prep-centos
 
-    - name: Reset CentOS NIC
-      azure_rm_networkinterface:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        resource_group: "{{ res_group }}"
-        name: "nic01{{ lab_id }}"
-        virtual_network: "vn{{ lab_id }}"
-        subnet: "sn{{ lab_id }}"
-        ip_configurations:
-        - name: "primary"
-          public_ip_name: "pbi01{{ lab_id }}"
-          private_ip_address: "{{ centos_ip_address }}"
-          private_ip_allocation_method: "Static"
-          primary: "yes"
-        security_group: "sg{{ lab_id }}"
-      tags:
-        - prep-centos
 
-    - name: Add host to dynamic inventory
-      add_host:
-        name: "centos"
-        ansible_host: "{{ create_centos_vm_output.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0].properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress }}"
-        ansible_user: "{{ username }}"
-        #ansible_ssh_private_key_file: "insecure"
-        ansible_ssh_pass: "{{ password }}"
-        ansible_sudo_pass: "{{ password }}"
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
-      tags:
-        - prep-centos
+
+
 #
 # Create Windows NIC and VM 
 #
