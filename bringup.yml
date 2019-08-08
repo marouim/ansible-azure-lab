@@ -4,7 +4,6 @@
   connection: local
   gather_facts: false
   vars:
-    res_group: lab
     storage_class: Standard_LRS
     virtual_network_cidr: 192.168.33.0/24
     username: "ansible"
@@ -39,7 +38,11 @@
         - azure_tenant
         - azure_subscription_id
         - azure_secret 
-
+    
+    - name: "Define the resource group name"
+      set_fact:
+        res_group: "{{ lab_id }}"
+  
   tasks:
 #
 # Generic tasks to bring the environment
@@ -361,6 +364,7 @@
           wait_for:
             port: 22
             timeout: 3000
+
         - name: "Create labs directory in the {{ username }}'s home'"
           file:
             path: "/home/{{ username }}/labs"
@@ -368,37 +372,74 @@
             owner: "{{ username }}"
             mode: 0755
             group: "{{ username }}"
+
         - name: "Add the user {{ username }} to the sudoer file."
           template:
             dest: "/etc/sudoers.d/waagent" 
             src: "waagent.j2" 
             mode: 0600
             owner: root 
-            group: root    
+            group: root  
+
         - name: "Download Tower release from {{ ansible_tower_release_url }}"
           get_url:
             dest: /var/tmp # required. Absolute path of where to download the file to.,If C(dest) is a directory, either the server provided filename or, if none provided, the base name of the URL on the remote server will be used. If a directory, C(force) has no effect.,If C(dest) is a directory, the file will always be downloaded (regardless of the C(force) option), but replaced only if the contents changed..
             url: "{{ ansible_tower_release_url }}" # required. HTTP, HTTPS, or FTP URL in the form (http|https|ftp)://[user[:pass]]@host.domain[:port]/path
           register: get_tower
+
         - name: "Extract Tower archive"
           unarchive:
             dest: /var/tmp/ # required. Remote absolute path where the archive should be unpacked.
             src: "/var/tmp/{{ ansible_tower_archive }}" # required. If C(remote_src=no) (default), local path to archive file to copy to the target server; can be absolute or relative. If C(remote_src=yes), path on the target server to existing archive file to unpack.,If C(remote_src=yes) and C(src) contains C(://), the remote machine will download the file from the URL first. (version_added 2.0). This is only for simple cases, for full download support use the M(get_url) module.
             remote_src: yes # not required. Set to C(yes) to indicate the archived file is already on the remote system and not local to the Ansible controller.,This option is mutually exclusive with C(copy).
           when: get_tower.changed
+
         - name: "Set the Tower password in the installation inventory file"
           replace:
             path: "/var/tmp/{{ ansible_tower_basename }}-{{ ansible_tower_version }}/inventory" 
             regexp: "^(.*)_password=''" 
             replace: "\\1_password='{{ ansible_tower_password }}'"
           when: get_tower.changed
+
         - name: "Launch Tower installation"
           command: "/var/tmp/{{ ansible_tower_basename }}-{{ ansible_tower_version }}/setup.sh"
           when: get_tower.changed or ansible_tower_install != false 
+
         - name: "Install required Python libraries"
           yum: 
             name: [python2-pip, python2-winrm, python2-requests]  
             state: installed
+
+        - name: "Wait for Tower API to be ready"
+          wait_for:
+            port: 443
+            timeout: 3000
+
+        - name: "Check if there is a license file available on the current directory"
+          local_action: stat path=ansible_license.json
+          register: ansible_license_check
+        
+        - set_fact:
+            ansible_tower_url: "https://{{ create_centos_vm_output.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0].properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress }}/"
+
+        - name: "Install the Tower license using API"
+          when: ansible_license_check.stat.exists
+          uri:
+            url: "{{ ansible_tower_url }}api/v2/config/"
+            body_format: json
+            src: "ansible_license.json"
+            url_username: "admin"
+            url_password: "{{ ansible_tower_password }}"
+            force_basic_auth: yes
+            method: "POST"
+            validate_certs: no
+          register: tower_add_license
+
+        - name: "Skip the Tower license installation"
+          when: not ansible_license_check.stat.exists
+          debug:
+            msg: "No ansible_license.json file found. Skipping the license installation."
+
       delegate_to: centos
       tags:
         - prep-centos
@@ -466,6 +507,6 @@
         content: |
           Lab {{ lab_id }}
           Windows machine ip is {{ create_windows_vm_output.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0].properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress }} you can now RDP to it.
-          Tower url is https://{{ create_centos_vm_output.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0].properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress }}/
+          Tower url is {{ ansible_tower_url }}
 
         
