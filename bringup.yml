@@ -8,9 +8,6 @@
     - import_tasks: "tasks/check_variables.yaml"
   
   tasks:
-#
-# Generic tasks to bring the environment
-#
     - import_tasks: "tasks/create_azure_environment.yaml"
       tags:
         - create_azure_env
@@ -34,284 +31,23 @@
       with_items: "{{ topology.virtual_machines }}"
       vars:
         vm_name: "{{ item.vm_name }}"
+        os_type: "{{ item.os_type }}"
         vm_ip_address: "{{ item.vm_ip_address }}"
         vm_security_group: "{{ item.vm_security_group }}"
         vm_image: "{{ item.vm_image }}"
         vm_size: "{{ item.vm_size }}"
         vm_subnet: "sn{{ lab_id }}"
         vm_virtual_network: "vn{{ lab_id }}"
+        vm_ssh_public_keys: "{{ item.vm_ssh_public_keys | default(omit) }}"
 
+    - name: "Install Ansible Tower"
+      when: ansible_tower_install
+      import_tasks: "tasks/tower_install.yaml"
 
-    - fail:
-        msg: "test"
+    - name: "Install Windows Desktop"
+      when: windows_desktop_install
+      import_tasks: "tasks/windows_desktop_install.yaml"
 
-
-
-
-
-#
-# Create CentOS NIC and VM 
-#
-
-
-
-
-
-#
-# Create Windows NIC and VM 
-#
-    - name: Create NIC for Windows VM
-      azure_rm_networkinterface:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        resource_group: "{{ res_group }}"
-        name: "nic02{{ lab_id }}"
-        virtual_network: "vn{{ lab_id }}"
-        subnet: "sn{{ lab_id }}"
-        ip_configurations:
-        - name: "primary"
-          public_ip_name: "pbi02{{lab_id }}"
-          private_ip_address: "{{ windows_ip_address }}"
-          private_ip_allocation_method: "Static"
-          primary: "yes"
-        security_group: "sg{{ lab_id }}"
-      tags:
-        - prep-windows
-
-    - name: Create Windows VM
-      azure_rm_virtualmachine:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        resource_group: "{{ res_group }}"
-        name: "win{{ lab_id }}"
-        os_type: "Windows"
-        vm_size: "{{ windows_vm_size }}"
-        storage_account: "lrs{{ lab_id }}"
-        storage_container: "vms{{lab_id}}"
-        storage_blob: "windows{{lab_id}}.vhd"
-        admin_username: "{{ username }}"
-        admin_password: "{{ password }}"
-        network_interfaces: "nic02{{lab_id}}"
-        image:
-          publisher: "MicrosoftWindowsServer"
-          offer: "WindowsServer"
-          sku: "2016-Datacenter"
-          version: "latest"
-        # image:
-        #   offer: "Windows-10"
-        #   publisher: MicrosoftWindowsDesktop
-        #   sku: "RS3-Pro"
-        #   version: latest
-      register: create_windows_vm_output
-      tags:
-        - prep-windows
-
-    - name: Create Windows VM Extension
-      azure_rm_virtualmachine_extension:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        name: "vmext{{ lab_id }}"
-        resource_group: "{{ res_group }}"
-        virtual_machine_name: "win{{ lab_id }}"
-        publisher: Microsoft.Compute
-        virtual_machine_extension_type: CustomScriptExtension
-        type_handler_version: 1.9
-        settings:
-          CommandToExecute: "powershell -ExecutionPolicy Unrestricted -file provision.ps1" 
-          FileUris: [ "https://raw.githubusercontent.com/sperreault/ansible-azure-lab/master/provision.ps1" ]
-      ignore_errors: true
-      register: create_windows_vm_extension
-      tags:
-        - prep-windows
-
-    - name: Reset Windows NIC
-      azure_rm_networkinterface:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        resource_group: "{{ res_group }}"
-        name: "nic02{{ lab_id }}"
-        virtual_network: "vn{{ lab_id }}"
-        subnet: "sn{{ lab_id }}"
-        ip_configurations:
-        - name: "primary"
-          public_ip_name: "pbi02{{lab_id }}"
-          private_ip_address: "{{ windows_ip_address }}"
-          private_ip_allocation_method: "Static"
-          primary: "yes"
-        security_group: "sg{{ lab_id }}"
-      tags:
-        - prep-windows
-
-    - name: Add host to dynamic inventory
-      add_host:
-        name: "windows"
-        ansible_host: "{{ create_windows_vm_output.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0].properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress }}"
-        ansible_user: "{{ username }}"
-        ansible_password: "{{ password }}"
-        ansible_port: 5985
-        ansible_connection: winrm
-        ansible_winrm_transport: basic      
-      tags:
-        - prep-windows
-
-#    - name: Upload environment information
-#      template:
-#        src: environment.html.j2
-#        dest: "/var/www/rhmtlsas.eastus.cloudapp.azure.com/{{ lab_id }}.html"
-#        mode: 0644
-#      delegate_to: rhmtlsas.eastus.cloudapp.azure.com
-
-#
-# Install Tower and Prepare the Linux Host
-#
-    - name: Prepare the Linux Host
-      become: true
-      block:
-        - name: "Waiting for the Tower VM to be ready"
-          wait_for:
-            port: 22
-            timeout: 3000
-
-        - name: "Create labs directory in the {{ username }}'s home'"
-          file:
-            path: "/home/{{ username }}/labs"
-            state: "directory"
-            owner: "{{ username }}"
-            mode: 0755
-            group: "{{ username }}"
-
-        - name: "Add the user {{ username }} to the sudoer file."
-          template:
-            dest: "/etc/sudoers.d/waagent" 
-            src: "waagent.j2" 
-            mode: 0600
-            owner: root 
-            group: root  
-
-        - name: "Download Tower release from {{ ansible_tower_release_url }}"
-          get_url:
-            dest: /var/tmp # required. Absolute path of where to download the file to.,If C(dest) is a directory, either the server provided filename or, if none provided, the base name of the URL on the remote server will be used. If a directory, C(force) has no effect.,If C(dest) is a directory, the file will always be downloaded (regardless of the C(force) option), but replaced only if the contents changed..
-            url: "{{ ansible_tower_release_url }}" # required. HTTP, HTTPS, or FTP URL in the form (http|https|ftp)://[user[:pass]]@host.domain[:port]/path
-          register: get_tower
-
-        - name: "Extract Tower archive"
-          unarchive:
-            dest: /var/tmp/ # required. Remote absolute path where the archive should be unpacked.
-            src: "/var/tmp/{{ ansible_tower_archive }}" # required. If C(remote_src=no) (default), local path to archive file to copy to the target server; can be absolute or relative. If C(remote_src=yes), path on the target server to existing archive file to unpack.,If C(remote_src=yes) and C(src) contains C(://), the remote machine will download the file from the URL first. (version_added 2.0). This is only for simple cases, for full download support use the M(get_url) module.
-            remote_src: yes # not required. Set to C(yes) to indicate the archived file is already on the remote system and not local to the Ansible controller.,This option is mutually exclusive with C(copy).
-          when: get_tower.changed
-
-        - name: "Set the Tower password in the installation inventory file"
-          replace:
-            path: "/var/tmp/{{ ansible_tower_basename }}-{{ ansible_tower_version }}/inventory" 
-            regexp: "^(.*)_password=''" 
-            replace: "\\1_password='{{ ansible_tower_password }}'"
-          when: get_tower.changed
-
-        - name: "Launch Tower installation"
-          command: "/var/tmp/{{ ansible_tower_basename }}-{{ ansible_tower_version }}/setup.sh"
-          args:
-            chdir: "/var/tmp/{{ ansible_tower_basename }}-{{ ansible_tower_version }}"
-          when: get_tower.changed or ansible_tower_install != false 
-
-        - name: "Install required Python libraries"
-          yum: 
-            name: [python2-pip, python2-winrm, python2-requests]  
-            state: installed
-
-        - name: "Wait for Tower API to be ready"
-          wait_for:
-            port: 443
-            timeout: 3000
-
-        - name: "Check if there is a license file available on the current directory"
-          local_action: stat path=ansible_license.json
-          register: ansible_license_check
-        
-        - set_fact:
-            ansible_tower_url: "https://{{ create_centos_vm_output.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0].properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress }}/"
-
-        - name: "Install the Tower license using API"
-          when: ansible_license_check.stat.exists
-          uri:
-            url: "{{ ansible_tower_url }}api/v2/config/"
-            body_format: json
-            src: "ansible_license.json"
-            url_username: "admin"
-            url_password: "{{ ansible_tower_password }}"
-            force_basic_auth: yes
-            method: "POST"
-            validate_certs: no
-          register: tower_add_license
-
-        - name: "Skip the Tower license installation"
-          when: not ansible_license_check.stat.exists
-          debug:
-            msg: "No ansible_license.json file found. Skipping the license installation."
-
-      delegate_to: centos
-      tags:
-        - prep-centos
-#
-# Install VisualStudio Code and Putty on the Windows VM
-#
-    - name: Retry the windows extensions if they failed
-      azure_rm_virtualmachine_extension:
-        client_id: "{{ azure_client_id }}"
-        tenant: "{{ azure_tenant }}"
-        subscription_id: "{{ azure_subscription_id }}"
-        secret: "{{ azure_secret }}"
-        name: "vmext{{ lab_id }}"
-        resource_group: "{{ res_group }}"
-        virtual_machine_name: "win{{ lab_id }}"
-        publisher: Microsoft.Compute
-        virtual_machine_extension_type: CustomScriptExtension
-        type_handler_version: 1.9
-        settings:
-          CommandToExecute: "powershell -ExecutionPolicy Unrestricted -file provision.ps1" 
-          FileUris: [ "https://raw.githubusercontent.com/sperreault/ansible-azure-lab/master/provision.ps1" ]
-      when: create_windows_vm_extension is failed
-
-    - name: Prepare the Windows Host
-      block:
-        - wait_for_connection:
-            delay: 60
-            timeout: 3000
-        - win_chocolatey:
-            name: "{{ item }}"
-            state: present
-          with_items:
-            - putty.install
-            - git
-            - visualstudiocode
-        - win_file:
-            path: 'c:\labs'
-            state: directory 
-          with_items:
-            - 'c:\labs'
-            - 'c:\labs\.vscode'
-        - win_copy:
-            src: "{{ item }}"
-            dest: "c:\\labs\\{{ item }}"
-          with_items:
-            - "insecure"
-            - "insecure.pub"
-            - "vscode.sftp.json"
-        - win_shortcut:
-            src: C:\Program Files\PuTTY\putty.exe
-            dest: '%Public%\Desktop\Putty.lnk'
-            icon: C:\Program Files\PuTTY\putty.exe,0            
-      delegate_to: windows
-      tags:
-        - prep-windows   
 
 #
 # Create a local file with the information
@@ -323,7 +59,5 @@
         dest: "{{ lab_id }}.txt"
         content: |
           Lab {{ lab_id }}
-          Windows machine ip is {{ create_windows_vm_output.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0].properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress }} you can now RDP to it.
+          Windows machine ip is {{ windows_desktop_ip_address }} you can now RDP to it.
           Tower url is {{ ansible_tower_url }}
-
-        
