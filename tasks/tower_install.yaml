@@ -45,6 +45,11 @@
         chdir: "/var/tmp/{{ ansible_tower_basename }}-{{ ansible_tower_version }}"
       when: get_tower.changed or ansible_tower_install != false 
 
+    - name: "Install EPEL"
+      yum: 
+        name: epel-release
+        state: installed
+
     - name: "Install required Python libraries"
       yum: 
         name: [python2-pip, python2-winrm, python2-requests]  
@@ -54,30 +59,31 @@
       wait_for:
         port: 443
         timeout: 3000
-
-    - name: "Check if there is a license file available on the current directory"
-      local_action: stat path=ansible_license.json
-      register: ansible_license_check
-    
-    - set_fact:
-        ansible_tower_url: "https://{{ ansible_tower_ip_address }}/"
-
-    - name: "Install the Tower license using API"
-      when: ansible_license_check.stat.exists
-      uri:
-        url: "{{ ansible_tower_url }}api/v2/config/"
-        body_format: json
-        src: "ansible_license.json"
-        url_username: "admin"
-        url_password: "{{ ansible_tower_password }}"
-        force_basic_auth: yes
-        method: "POST"
-        validate_certs: no
-      register: tower_add_license
-
-    - name: "Skip the Tower license installation"
-      when: not ansible_license_check.stat.exists
-      debug:
-        msg: "No ansible_license.json file found. Skipping the license installation."
-
+  
   delegate_to: "{{ ansible_tower_vm_name }}"
+
+
+- name: "Check if there is a license file available on the current directory"
+  local_action: stat path=ansible_license.json
+  register: ansible_license_check
+
+- set_fact:
+    ansible_tower_url: "https://{{ ansible_tower_ip_address }}/"
+
+- name: "Install the Tower license using API"
+  when: ansible_license_check.stat.exists
+  uri:
+    url: "{{ ansible_tower_url }}api/v2/config/"
+    body_format: json
+    src: "ansible_license.json"
+    url_username: "admin"
+    url_password: "{{ ansible_tower_password }}"
+    force_basic_auth: yes
+    method: "POST"
+    validate_certs: no
+  register: tower_add_license
+
+- name: "Skip the Tower license installation"
+  when: not ansible_license_check.stat.exists
+  debug:
+    msg: "No ansible_license.json file found. Skipping the license installation."
