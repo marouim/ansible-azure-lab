@@ -4,15 +4,13 @@
   connection: local
   gather_facts: false
   vars:
-    res_group: lab
+    res_group: pod1
+
     storage_class: Standard_LRS
     virtual_network_cidr: 192.168.33.0/24
     username: "ansible"
     password: "Password1!"
-    centos_vm_size: Standard_D2_v3
-    centos_ip_address: "192.168.33.51"
-    windows_vm_size: Standard_D2_v3
-    windows_ip_address: "192.168.33.50"
+    
     ansible_tower_install: false
     ansible_tower_basename: "ansible-tower-setup"
     ansible_tower_version: "3.5.1-1"
@@ -27,28 +25,21 @@
   
   tasks:
 
-    - name: "Check if there is a license file available on the current directory"
-      local_action: stat path=ansible_license.json
-      register: ansible_license_check
-
-    - debug:
-        var: ansible_license_check
-
     - set_fact:
-        tower_url: "https://13.92.199.83/"
-
-    - name: "Install the Tower license using API"
-      when: ansible_license_check.stat.exists
-      uri:
-        url: "{{ tower_url }}api/v2/config/"
-        body_format: json
-        src: "ansible_license.json"
-        url_username: "admin"
-        url_password: "{{ ansible_tower_password }}"
-        force_basic_auth: yes
-        method: "POST"
-        validate_certs: no
-      register: tower_add_license
+        vm_name: "tower"
+    
+    - name: Get facts for VM {{ vm_name }}
+      azure_rm_virtualmachine:
+        client_id: "{{ azure_client_id }}"
+        tenant: "{{ azure_tenant }}"
+        subscription_id: "{{ azure_subscription_id }}"
+        secret: "{{ azure_secret }}"
+        resource_group: "{{ res_group }}"
+        name: "{{ vm_name }}"
+      register: vm_facts
+    
+    - debug:
+        var: vm_facts
 
     - debug:
-        var: tower_add_license
+        msg: "{{ vm_facts.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0].properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress }}"
