@@ -1,0 +1,57 @@
+
+- name: Get facts for VM {{ windows_desktop_vm_name }}
+  azure_rm_virtualmachine:
+    client_id: "{{ azure_client_id }}"
+    tenant: "{{ azure_tenant }}"
+    subscription_id: "{{ azure_subscription_id }}"
+    secret: "{{ azure_secret }}"
+    resource_group: "{{ res_group }}"
+    name: "{{ windows_desktop_vm_name }}"
+  register: vm_facts
+
+- set_fact:
+    windows_desktop_ip_address: "{{ vm_facts.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0].properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress }}"
+
+- debug:
+    msg: "Public IP is {{ ansible_tower_ip_address }}"
+
+- name: Prepare Windows Desktop
+  block:
+    - name: "Wait for the VM to be ready"
+      wait_for_connection:
+        delay: 60
+        timeout: 3000
+      
+    - name: "Install desktop development tools"
+      win_chocolatey:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - putty.install
+        - git
+        - visualstudiocode
+    
+    - name: "Create labs directory structure"
+      win_file:
+        path: 'c:\labs'
+        state: directory 
+      with_items:
+        - 'c:\labs'
+        - 'c:\labs\.vscode'
+
+    - name: "Copy SSH keys to the labs directory"
+      win_copy:
+        src: "{{ item }}"
+        dest: "c:\\labs\\{{ item }}"
+      with_items:
+        - "insecure"
+        - "insecure.pub"
+        - "vscode.sftp.json"
+
+    - name: "Create desktop shortcuts"
+      win_shortcut:
+        src: C:\Program Files\PuTTY\putty.exe
+        dest: '%Public%\Desktop\Putty.lnk'
+        icon: C:\Program Files\PuTTY\putty.exe,0
+  
+  delegate_to: "{{ windows_desktop_vm_name }}"
