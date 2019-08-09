@@ -43,9 +43,8 @@
     admin_password: "{{ password }}"
     network_interfaces: "nic-{{ vm_name }}"
     image: "{{ vm_image }}"
-    ssh_public_keys: 
-      - path: /home/{{ username }}/.ssh/authorized_keys
-        key_data: "{{ lookup('file', 'insecure.pub') }}"
+    os_type: "{{ os_type }}"
+    ssh_public_keys: "{{ vm_ssh_public_keys | default(omit) }}"
   register: create_vm_output
 
 - set_fact:
@@ -59,3 +58,53 @@
     #ansible_ssh_private_key_file: "insecure"
     ansible_ssh_pass: "{{ password }}"
     ansible_sudo_pass: "{{ password }}"
+
+# When the os_type from the topology is "windows"
+# - Configure winrm using Powershell extensions
+- name: Create Windows VM Extension
+  when: os_type == "Windows"
+  azure_rm_virtualmachine_extension:
+    client_id: "{{ azure_client_id }}"
+    tenant: "{{ azure_tenant }}"
+    subscription_id: "{{ azure_subscription_id }}"
+    secret: "{{ azure_secret }}"
+    name: "vmext-{{ vm_name }}"
+    resource_group: "{{ res_group }}"
+    virtual_machine_name: "{{ vm_name }}"
+    publisher: Microsoft.Compute
+    virtual_machine_extension_type: CustomScriptExtension
+    type_handler_version: 1.9
+    settings:
+      CommandToExecute: "powershell -ExecutionPolicy Unrestricted -file provision.ps1" 
+      FileUris: [ "https://raw.githubusercontent.com/sperreault/ansible-azure-lab/master/provision.ps1" ]
+  ignore_errors: true
+  register: create_windows_vm_extension
+
+# When the os_type from the topology is "linux"
+# - Configure the user to be part of sudoers 
+# - Add labs directory to user home directory
+- name: "Prepare Linux Host"
+  when: os_type == "Linux"
+  become: yes
+  block:
+    - name: "Waiting for the Linux VM to be ready"
+      wait_for:
+        port: 22
+        timeout: 3000
+
+    - name: "Create labs directory in the {{ username }}'s home'"
+      file:
+        path: "/home/{{ username }}/labs"
+        state: "directory"
+        owner: "{{ username }}"
+        mode: 0755
+        group: "{{ username }}"
+
+    - name: "Add the user {{ username }} to the sudoer file."
+      template:
+        dest: "/etc/sudoers.d/waagent" 
+        src: "waagent.j2" 
+        mode: 0600
+        owner: root
+        group: root
+  delegate_to: "{{ vm_name }}"
