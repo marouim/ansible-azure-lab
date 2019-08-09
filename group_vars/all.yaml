@@ -86,7 +86,25 @@ default_security_rules_windows:
     access: Allow
     priority: 105
     direction: Inbound
-
+  - name: SSH
+    protocol: Tcp
+    destination_port_range: 22
+    access: Allow
+    priority: 101
+    direction: Inbound
+  - name: HTTP
+    protocol: Tcp
+    destination_port_range: 80
+    access: Allow
+    priority: 103
+    direction: Inbound
+  - name: HTTPS
+    protocol: Tcp
+    destination_port_range: 443
+    access: Allow
+    priority: 104
+    direction: Inbound
+    
 default_security_rules_linux:
   - name: SSH
     protocol: Tcp
