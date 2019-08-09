@@ -1,12 +1,18 @@
+azure_client_id: "{{ lookup('env', 'AZURE_CLIENT_ID')}}"
+azure_tenant: "{{ lookup('env', 'AZURE_TENANT')}}"
+azure_subscription_id: "{{ lookup('env', 'AZURE_SUBSCRIPTION_ID')}}"
+azure_secret: "{{ lookup('env', 'AZURE_SECRET')}}"
+
 storage_class: Standard_LRS
 virtual_network_cidr: 192.168.33.0/24
+
 username: "ansible"
 password: "Password1!"
-
 
 topology:
   virtual_machines:
     - vm_name: tower
+      os_type: Linux
       vm_size: Standard_D2_v3
       vm_ip_address: "192.168.33.51"
       vm_security_group: "sg-linux"
@@ -15,8 +21,12 @@ topology:
         publisher: OpenLogic
         sku: '7.4'
         version: latest
+      vm_ssh_public_keys:
+        - path: /home/{{ username }}/.ssh/authorized_keys
+          key_data: "{{ lookup('file', 'insecure.pub') }}"
 
     - vm_name: linux1
+      os_type: Linux
       vm_size: Standard_D2_v3
       vm_ip_address: "192.168.33.101"
       vm_security_group: "sg-linux"
@@ -25,8 +35,12 @@ topology:
         publisher: OpenLogic
         sku: '7.4'
         version: latest
+      vm_ssh_public_keys:
+        - path: /home/{{ username }}/.ssh/authorized_keys
+          key_data: "{{ lookup('file', 'insecure.pub') }}"
 
     - vm_name: desktop
+      os_type: Windows
       vm_size: Standard_D2_v3
       vm_ip_address: "192.168.33.50"
       vm_security_group: "sg-windows"
@@ -37,6 +51,7 @@ topology:
         version: "latest"
 
     - vm_name: windows1
+      os_type: Windows
       vm_size: Standard_D2_v3
       vm_ip_address: "192.168.33.201"
       vm_security_group: "sg-windows"
@@ -46,37 +61,17 @@ topology:
         sku: "2016-Datacenter"
         version: "latest"
 
-
-
-
-linux_vm_size: Standard_D2_v3
-linux_ip_address: "192.168.33.51"
-linux_vm_image:
-      offer: CentOS
-      publisher: OpenLogic
-      sku: '7.4'
-      version: latest
-
-windows_vm_size: Standard_D2_v3
-windows_ip_address: "192.168.33.50"
-windows_vm_image:
-      offer: CentOS
-      publisher: OpenLogic
-      sku: '7.4'
-      version: latest
-
-
-ansible_tower_install: false
+ansible_tower_install: true
+ansible_tower_vm_name: tower
 ansible_tower_basename: "ansible-tower-setup"
 ansible_tower_version: "3.5.1-1"
 ansible_tower_archive: "{{ ansible_tower_basename }}-{{ ansible_tower_version }}.tar.gz"
 ansible_tower_release_url: "http://releases.ansible.com/ansible-tower/setup/{{ ansible_tower_archive }}"
 ansible_tower_password: "ansible"
 
-azure_client_id: "{{ lookup('env', 'AZURE_CLIENT_ID')}}"
-azure_tenant: "{{ lookup('env', 'AZURE_TENANT')}}"
-azure_subscription_id: "{{ lookup('env', 'AZURE_SUBSCRIPTION_ID')}}"
-azure_secret: "{{ lookup('env', 'AZURE_SECRET')}}"
+windows_desktop_install: true
+windows_desktop_vm_name: desktop
+
 
 default_security_rules_windows:
   - name: RDP
